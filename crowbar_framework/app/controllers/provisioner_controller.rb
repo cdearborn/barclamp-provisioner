@@ -86,10 +86,6 @@ class ProvisionerController < BarclampController
       customized_kickstart += IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_2.template" )
     end
 
-    ksc = File.open( "/tmp/kickstart_chunk", "w" )
-    ksc.write( customized_kickstart )
-    ksc.close
-
     # Send the result back to the caller
     render :inline => "customized kickstart: #{customized_kickstart}", :cache => false
   end 

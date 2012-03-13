@@ -1,5 +1,0 @@
-bootloader --location=mbr --driveorder=INSTALLATION_DRIVES  --append="rhgb quiet"
-zerombr
-
-ignoredisk --only-use=INSTALLATION_DRIVES
-clearpart --all --drives=INSTALLATION_DRIVES

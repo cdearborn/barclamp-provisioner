@@ -14,6 +14,8 @@
 # 
 
 class ProvisionerController < BarclampController
+  DriveLetters="abcdefghijklmnopqrstuvwxyz"
+
   def initialize
     @service_object = ProvisionerService.new logger
   end
@@ -35,8 +37,19 @@ class ProvisionerController < BarclampController
       disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
       drive_name = disks[0].basename
 
+      scsi_ignore_drives = ""
+      sata_ignore_drives = ""
+      DriveLetters.each_char do |drive_letter|
+        next if drive_name[drive_name.length-1,1] == drive_letter
+        scsi_ignore_drives += "sd#{drive_letter},"
+        sata_ignore_drives += "hd#{drive_letter},"
+      end
+      ignore_drives="#{scsi_ignore_drives}#{sata_ignore_drives}"
+      ignore_drives.chomp! ","
+
       customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_noraid.template" )
       customized_kickstart.gsub!("INSTALLATION_DRIVE", drive_name)
+      customized_kickstart.gsub!("IGNORE_DRIVES", ignore_drives)
       customized_kickstart += "\n"
     else
       disks = node.get_internal_disks

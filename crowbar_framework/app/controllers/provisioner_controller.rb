@@ -35,20 +35,11 @@ class ProvisionerController < BarclampController
       end
 
       disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
-      drive_name = disks[0].basename
-
-      scsi_ignore_drives = ""
-      sata_ignore_drives = ""
-      DriveLetters.each_char do |drive_letter|
-        next if drive_name[drive_name.length-1,1] == drive_letter
-        scsi_ignore_drives += "sd#{drive_letter},"
-        sata_ignore_drives += "hd#{drive_letter},"
-      end
-      ignore_drives="#{scsi_ignore_drives}#{sata_ignore_drives}"
-      ignore_drives.chomp! ","
+      drive = disks[0]
+      ignore_drives = get_ignore_drives( [drive] )
 
       customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_noraid.template" )
-      customized_kickstart.gsub!("INSTALLATION_DRIVE", drive_name)
+      customized_kickstart.gsub!("INSTALLATION_DRIVE", drive.basename)
       customized_kickstart.gsub!("IGNORE_DRIVES", ignore_drives)
       customized_kickstart += "\n"
     else
@@ -68,10 +59,55 @@ class ProvisionerController < BarclampController
         disk_number = disk_number+1
       end
 
-      customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_1.template" )
-      customized_kickstart.gsub!("INSTALLATION_DRIVES", drive_names)
+      ignore_drives = get_ignore_drives( disks )
 
-      # Generate the partition lines
+      # Generate the full template
+      customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_1.template" )
+
+      customized_kickstart += get_partition_lines( disks, "ext4" )
+
+      customized_kickstart += IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_2.template" )
+
+      customized_kickstart += get_partition_lines( disks, "ext3" )
+
+      customized_kickstart += IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_3.template" )
+
+      customized_kickstart.gsub!("INSTALLATION_DRIVES", drive_names)
+      customized_kickstart.gsub!("IGNORE_DRIVES", ignore_drives)
+    end
+
+    # Send the result back to the caller
+    render :inline => "customized kickstart: #{customized_kickstart}", :cache => false
+  end 
+
+
+  def get_ignore_drives drives
+      scsi_ignore_drives = ""
+      sata_ignore_drives = ""
+      DriveLetters.each_char do |drive_letter|
+        found=false
+        drives.each do |drive|
+          drive_name=drive.basename
+          if drive_name[drive_name.length-1,1] == drive_letter
+            found=true
+            break
+          end
+        end
+
+        next if found
+
+        scsi_ignore_drives += "sd#{drive_letter},"
+        sata_ignore_drives += "hd#{drive_letter},"
+      end
+
+      ignore_drives="#{scsi_ignore_drives}#{sata_ignore_drives}"
+      ignore_drives.chomp! ","
+      ignore_drives
+  end
+
+  def get_partition_lines( disks, fs_type )
+      partition_lines=""
+
       disk_number=1
       boot_partitions=""
       swap_partitions=""
@@ -80,8 +116,8 @@ class ProvisionerController < BarclampController
         boot_partition_name = "raid.#{disk_number}0"
         swap_partition_name = "raid.#{disk_number}1"
 
-        customized_kickstart += "part #{boot_partition_name}    --size 100         --asprimary --ondrive=#{disk.basename}\n"
-        customized_kickstart += "part #{swap_partition_name}    --size 1   --grow  --asprimary --ondrive=#{disk.basename}\n"
+        partition_lines += "part #{boot_partition_name}    --size 100         --asprimary --ondrive=#{disk.basename}\n"
+        partition_lines += "part #{swap_partition_name}    --size 1   --grow  --asprimary --ondrive=#{disk.basename}\n"
 
         boot_partitions += boot_partition_name
         boot_partitions += " " if disk_number < disks.length
@@ -93,14 +129,8 @@ class ProvisionerController < BarclampController
       end
 
       # Generate the raid lines
-      customized_kickstart += "raid /boot --fstype ext4 --device=md0 --level=RAID1 #{boot_partitions}\n"
-      customized_kickstart += "raid pv.01 --fstype ext4 --device=md1 --level=RAID1 #{swap_partitions}\n"
-
-      customized_kickstart += IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_2.template" )
-    end
-
-    # Send the result back to the caller
-    render :inline => "customized kickstart: #{customized_kickstart}", :cache => false
-  end 
-
+      partition_lines += "raid /boot --fstype #{fs_type} --device=md0 --level=RAID1 #{boot_partitions}\n"
+      partition_lines += "raid pv.01 --fstype #{fs_type} --device=md1 --level=RAID1 #{swap_partitions}\n"
+      partition_lines
+  end
 end

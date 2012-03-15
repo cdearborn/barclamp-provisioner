@@ -61,23 +61,20 @@ class ProvisionerController < BarclampController
 
       ignore_drives = get_ignore_drives( disks )
 
+      rhel5_partitions = get_partition_lines( disks, "ext3" )
+      rhel6_partitions = get_partition_lines( disks, "ext4" )
+
       # Generate the full template
-      customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_1.template" )
-
-      customized_kickstart += get_partition_lines( disks, "ext4" )
-
-      customized_kickstart += IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_2.template" )
-
-      customized_kickstart += get_partition_lines( disks, "ext3" )
-
-      customized_kickstart += IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid_3.template" )
+      customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid.template" )
 
       customized_kickstart.gsub!("INSTALLATION_DRIVES", drive_names)
       customized_kickstart.gsub!("IGNORE_DRIVES", ignore_drives)
+      customized_kickstart.gsub!("RHEL5_PARTITIONS", rhel5_partitions)
+      customized_kickstart.gsub!("RHEL6_PARTITIONS", rhel6_partitions)
     end
 
     # Send the result back to the caller
-    render :inline => "customized kickstart: #{customized_kickstart}", :cache => false
+    render :inline => customized_kickstart, :cache => false
   end 
 
 
@@ -129,8 +126,8 @@ class ProvisionerController < BarclampController
       end
 
       # Generate the raid lines
-      partition_lines += "raid /boot --fstype #{fs_type} --device=md0 --level=RAID1 #{boot_partitions}\n"
-      partition_lines += "raid pv.01 --fstype #{fs_type} --device=md1 --level=RAID1 #{swap_partitions}\n"
+      partition_lines += "raid /boot --fstype #{fs_type} --device=md0 --level=RAID1 #{boot_partitions}"
+      partition_lines += "raid pv.01 --fstype #{fs_type} --device=md1 --level=RAID1 #{swap_partitions}"
       partition_lines
   end
 end

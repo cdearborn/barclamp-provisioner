@@ -1,6 +1,0 @@
-volgroup lv_admin --pesize=32768 pv.01
-logvol / --fstype ext4 --name=lv_root --vgname=lv_admin --size=1 --grow
-logvol swap --fstype swap --name=lv_swap --vgname=lv_admin --recommended
-&lt;% else -%>
-ignoredisk --drives=IGNORE_DRIVES
-clearpart --all --drives=INSTALLATION_DRIVES

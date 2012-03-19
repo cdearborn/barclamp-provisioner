@@ -21,9 +21,16 @@ class ProvisionerController < BarclampController
   end
 
   def get_kickstart
-    node = NodeObject.find_nodes_by_name( params[:name] )[0]
+    if request.post?
+      errorMsg = "GET is required to access get_kickstart"
+      Rails.logger.warn errorMsg
+      return render :text=>"#{errorMsg}\n", :cache=>false, :status=>500
+    end
 
-    customized_kickstart = ""
+    node = NodeObject.find_nodes_by_name( params[:name] )[0]
+    @admin_node=NodeObject.find_admin_node
+
+    template_file = ""
     if( node.installation_drives_set == NodeObject::FrontDrives or
         node.software_raid_set == NodeObject::NoRaid )
 
@@ -36,45 +43,39 @@ class ProvisionerController < BarclampController
 
       disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
       drive = disks[0]
-      ignore_drives = get_ignore_drives( [drive] )
 
-      customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_noraid.template" )
-      customized_kickstart.gsub!("INSTALLATION_DRIVE", drive.basename)
-      customized_kickstart.gsub!("IGNORE_DRIVES", ignore_drives)
-      customized_kickstart += "\n"
+      # Set up substitution parameters for the renderer
+      @installation_drives = drive.basename
+      @ignore_drives = get_ignore_drives( [drive] )
+
+      template_file = "/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_noraid.template.erb"
     else
       disks = node.get_internal_disks
       disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
 
-      # Build up comma separated string of drives
-      drive_names = ""
+      # Set up substitution parameters for the renderer
+      @installation_drives = ""
       disk_number=1
       disks.each do |disk|
-        drive_names += disk.basename
+        @installation_drives += disk.basename
 
         if disk_number < disks.length 
-          drive_names += ","
+          @installation_drives += ","
         end
         
         disk_number = disk_number+1
       end
 
-      ignore_drives = get_ignore_drives( disks )
-
-      rhel5_partitions = get_partition_lines( disks, "ext3" )
-      rhel6_partitions = get_partition_lines( disks, "ext4" )
+      @ignore_drives = get_ignore_drives( disks )
+      @rhel5_partitions = get_partition_lines( disks, "ext3" )
+      @rhel6_partitions = get_partition_lines( disks, "ext4" )
 
       # Generate the full template
-      customized_kickstart = IO.read("/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid.template" )
-
-      customized_kickstart.gsub!("INSTALLATION_DRIVES", drive_names)
-      customized_kickstart.gsub!("IGNORE_DRIVES", ignore_drives)
-      customized_kickstart.gsub!("RHEL5_PARTITIONS", rhel5_partitions)
-      customized_kickstart.gsub!("RHEL6_PARTITIONS", rhel6_partitions)
+      template_file = "/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_raid.template.erb"
     end
 
     # Send the result back to the caller
-    render :inline => customized_kickstart, :cache => false
+    render template_file, :cache => false
   end 
 
 

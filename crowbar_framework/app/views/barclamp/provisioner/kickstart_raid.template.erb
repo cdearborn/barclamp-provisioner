@@ -1,0 +1,17 @@
+bootloader --location=mbr --driveorder=<%=@installation_drives%>  --append="rhgb quiet"
+zerombr
+<% if @admin_node[:platform_version].to_f >= 6 -%>
+ignoredisk --only-use=<%=@installation_drives%>
+clearpart --all --drives=<%=@installation_drives%>
+<%=@rhel6_partitions%>
+volgroup lv_admin --pesize=32768 pv.01
+logvol / --fstype ext4 --name=lv_root --vgname=lv_admin --size=1 --grow
+logvol swap --fstype swap --name=lv_swap --vgname=lv_admin --recommended
+<% else -%>
+ignoredisk --drives=<%=@ignore_drives%>
+clearpart --all --drives=<%=@installation_drives%>
+<%=@rhel5_partitions%>
+volgroup lv_admin --pesize=32768 pv.01
+logvol / --fstype ext3 --name=lv_root --vgname=lv_admin --size=1 --grow
+logvol swap --fstype swap --name=lv_swap --vgname=lv_admin --recommended
+<% end -%>

@@ -15,25 +15,8 @@ firewall --disabled
 authconfig --enableshadow --enablemd5
 selinux --disabled
 timezone --utc Europe/London
-bootloader --location=mbr --driveorder=sda --append="rhgb quiet"
-zerombr
-<% if node[:platform_version].to_f >= 6 -%>
-ignoredisk --only-use=sda
-clearpart --all --drives=sda
-part /boot --fstype ext4 --size=100 --ondisk=sda
-part swap --recommended
-part pv.6 --size=1 --grow --ondisk=sda
-volgroup lv_admin --pesize=32768 pv.6
-logvol / --fstype ext4 --name=lv_root --vgname=lv_admin --size=1 --grow
-<% else -%>
-ignoredisk --drives=sdb,sdc,sdd,sde,sdf,sdg,sdh,sdi,sdj,sdk,sdl,sdm,sdn,sdo,sdp,sdq,sdr,sds,sdt,sdu,sdv,sdw,sdx,sdy,sdz,hdb,hdc,hdd,hde,hdf,hdg,hdh,hdi,hdj,hdk,hdl,hdm,hdn,hdo,hdp,hdq,hdr,hds,hdt,hdu,hdv,hdw,hdx,hdy,hdz
-clearpart --all --drives=sda
-part /boot --fstype ext3 --size=100 --ondisk=sda
-part swap --recommended
-part pv.6 --size=0 --grow --ondisk=sda
-volgroup lv_admin --pesize=32768 pv.6
-logvol / --fstype ext3 --name=lv_root --vgname=lv_admin --size=1 --grow
-<% end -%>
+
+%include /tmp/diskpart
 
 text
 reboot
@@ -58,6 +41,41 @@ openssh
 curl.x86_64
 ntp
 tcpdump
+
+
+%pre
+#!/bin/bash
+
+exec > /tmp/pre-install.log 2>&1
+set -x -v
+
+while : ; do
+  sleep 10
+  if [ -d /mnt/sysimage/root ]; then
+    cp /tmp/pre-install.log /mnt/sysimage/root/
+    break
+  fi
+done &
+
+# Go get curl
+cd /tmp
+wget http://<%= @admin_node_ip %>:<%= @web_port %>/curl/curl
+chmod ugo+x ./curl
+
+# Get the authentication key
+key_re='crowbar\.install\.key=([^ ]+)'
+if [[ $(cat /proc/cmdline) =~ $key_re ]]; then
+    export CROWBAR_KEY="${BASH_REMATCH[1]}"
+else
+    echo "Unable to find corwbar.install.key parameter: $(cat /proc/cmdline)"
+    exit
+fi
+
+local curlargs=(-o /tmp/diskpart --connect-timeout 60 -s -L -X GET --max-time 240 -u "$CROWBAR_KEY" --digest --anyauth)
+./curl "${curlargs[@]}" "http://<%= @admin_node_ip %>:3000/crowbar/provisioner/1.0/get_kickstart/default?name=$(hostname)"
+
+sleep 240
+
 
 %post
 

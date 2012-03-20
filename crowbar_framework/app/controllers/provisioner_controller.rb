@@ -127,8 +127,8 @@ class ProvisionerController < BarclampController
       end
 
       # Generate the raid lines
-      partition_lines += "raid /boot --fstype #{fs_type} --device=md0 --level=RAID1 #{boot_partitions}"
-      partition_lines += "raid pv.01 --fstype #{fs_type} --device=md1 --level=RAID1 #{swap_partitions}"
+      partition_lines += "raid /boot --fstype #{fs_type} --device=md0 --level=RAID1 #{boot_partitions}\n"
+      partition_lines += "raid pv.01 --fstype #{fs_type} --device=md1 --level=RAID1 #{swap_partitions}\n"
       partition_lines
   end
 end

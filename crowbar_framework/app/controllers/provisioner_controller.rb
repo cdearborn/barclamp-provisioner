@@ -37,8 +37,10 @@ class ProvisionerController < BarclampController
       disks = []
       if( node.installation_drives_set == NodeObject::FrontDrives  )
         disks = node.get_front_disks
+        Rails.logger.debug "Found #{disks.length} front disks"
       else
         disks = node.get_internal_disks
+        Rails.logger.debug "Found #{disks.length} internal disks"
       end
 
       disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
@@ -51,6 +53,8 @@ class ProvisionerController < BarclampController
       template_file = "/opt/dell/crowbar_framework/app/views/barclamp/provisioner/kickstart_noraid.template.erb"
     else
       disks = node.get_internal_disks
+      Rails.logger.debug "Found #{disks.length} internal disks"
+
       disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
 
       # Set up substitution parameters for the renderer

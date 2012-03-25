@@ -135,4 +135,44 @@ class ProvisionerController < BarclampController
       partition_lines += "raid pv.01 --fstype #{fs_type} --device=md1 --level=RAID1 #{swap_partitions}\n"
       partition_lines
   end
+
+
+  def get_installation_drives
+    if request.post?
+      errorMsg = "GET is required to access get_kickstart"
+      Rails.logger.warn errorMsg
+      return render :text=>"#{errorMsg}\n", :cache=>false, :status=>500
+    end
+
+    node = NodeObject.find_nodes_by_name( params[:name] )[0]
+
+    template_file = ""
+    if( node.installation_drives_set == NodeObject::FrontDrives or
+        node.software_raid_set == NodeObject::NoRaid )
+
+      choice_disks = []
+      if( node.installation_drives_set == NodeObject::FrontDrives  )
+        choice_disks = node.get_front_disks
+        Rails.logger.debug "Found #{choice_disks.length} front disks"
+      else
+        choice_disks = node.get_internal_disks
+        Rails.logger.debug "Found #{choice_disks.length} internal disks"
+      end
+
+      choice_disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
+      disks = []
+      disks << choice_disks[0]
+    else
+      disks = node.get_internal_disks
+      Rails.logger.debug "Found #{disks.length} internal disks"
+
+      disks.sort! { |disk1,disk2| disk1.basename <=> disk2.basename }
+    end
+
+    disk_serial_numbers=""
+    disks.each { |disk| disk_serial_numbers += "#{disk.serial_number}\n" }
+
+    # Send the result back to the caller
+    render :text => disk_serial_numbers, :cache => false
+  end
 end

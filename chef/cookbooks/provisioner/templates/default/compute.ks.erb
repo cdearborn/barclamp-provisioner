@@ -71,8 +71,79 @@ else
     exit
 fi
 
-curlargs=(-o /tmp/diskpart --connect-timeout 60 -s -L -X GET --max-time 240 -u "$CROWBAR_KEY" --digest --anyauth)
-./curl "${curlargs[@]}" "http://<%= @admin_node_ip %>:3000/crowbar/provisioner/1.0/get_kickstart/default?name=$(hostname)"
+host_name=$(hostname)
+curlargs=(--connect-timeout 60 -s -L -X GET --max-time 240 -u "$CROWBAR_KEY" --digest --anyauth)
+drive_sns=$(./curl "${curlargs[@]}" "http://<%= @admin_node_ip %>:3000/crowbar/provisioner/1.0/get_installation_drives/default?name=${host_name}")
+
+
+# Translate the list of serial numbers into a list of drives
+drives=""
+num_drives=0
+for drive_sn in ${drive_sns}
+do
+    drive=$drive_sn
+    #drive=find_drive "${drive_sn}"
+
+    [ $num_drives -ne 0 ] && drives="${drives}\n"
+    drives="${drives}${drive}"
+
+    num_drives=$((num_drives+1))
+done
+
+sorted_drives=$(echo -e $drives|sort)
+
+# Put together comma separated sorted list of the drives
+install_drives=""
+first=1
+for sorted_drive in ${sorted_drives}
+do
+    [ $first -ne 1 ] && install_drives="${install_drives},"
+    install_drives="${install_drives}${sorted_drive}"
+
+    first=0
+done
+
+get_ignore_drives $sorted_drives
+
+get_ignore_drives()
+{
+    sorted_drives="$@"
+    drive_letters="abcdefghijklmnopqrstuvwxyz"
+
+    scsi_ignore_drives=""
+    sata_ignore_drives=""
+    letter_posn=0
+    while [ ${letter_posn} -lt ${#drive_letters} ]
+    do
+        test_letter=${drive_letters:$letter_posn:1}
+        letter_posn=$((letter_posn+1))
+
+        for sorted_drive in ${sorted_drives}
+        do
+            if [ "${test_letter}" = "${sorted_drive:2:1}" ]
+            then
+              continue 2
+            fi
+        done
+
+        scsi_ignore_drives="${scsi_ignore_drives}sd${test_letter},"
+        sata_ignore_drives="${sata_ignore_drives}hd${test_letter},"
+    done
+
+    IGNORE_DRIVES="${scsi_ignore_drives}${sata_ignore_drives}"
+    chop_length=$((${#IGNORE_DRIVES}-1))
+    IGNORE_DRIVES=${IGNORE_DRIVES:0:${chop_length}}
+}
+
+
+
+
+
+
+
+
+
+
 
 
 %post

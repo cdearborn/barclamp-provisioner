@@ -217,6 +217,18 @@ do
     num_drives=$((num_drives+1))
 done
 
+# If none of the drives have a SN, then we are running on a VM.  In this case,
+# we don't have internal or front drives, so just install on the first drive,
+# preferring scsi drives
+if [ -z "${drives}" ]
+then
+    drives=$(ls /dev/sd* | head -n 1)
+    if [ -z "${drives}" ]
+    then
+        drives=$(ls /dev/hd* | head -n 1)
+    fi
+fi
+
 sorted_drives=$(echo -e $drives|sort)
 
 get_install_drives $sorted_drives

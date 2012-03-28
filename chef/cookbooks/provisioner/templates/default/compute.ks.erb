@@ -49,6 +49,135 @@ tcpdump
 exec > /tmp/pre-install.log 2>&1
 set -x -v
 
+find_drive()
+{
+    serial_number=$@
+
+    DRIVE_NAME=""
+
+    file_prefixes="sd* hd*"
+    for file_prefix in ${file_prefixes}
+    do
+        for drive_name in $(ls /sys/block|grep "^${file_prefix}")
+        do
+            removable=$(cat /sys/block/${drive_name}/removable)
+            if [ "${removable}" -eq 1 ]
+            then
+                continue
+            fi
+
+            # Get the serial number of the drive
+            serial_number_line=$(hdparm -I /dev/${drive_name} | grep "Serial Number:")
+            test_serial_number=$(echo $serial_number_line|awk -F: '{print $2}')
+            test_serial_number=$(sed -e 's/^[:space:]*[:space:]$//' <<<$test_serial_number)
+
+            if [ "${test_serial_number}" = "${serial_number}" ]
+            then
+                DRIVE_NAME=${drive_name}
+                break
+            fi
+        done
+
+        if [ -n "${DRIVE_NAME}" ]
+        then
+            break
+        fi
+    done
+}
+
+get_install_drives()
+{
+    # Put together comma separated sorted list of the drives
+    INSTALL_DRIVES=""
+    first=1
+    for sorted_drive in ${sorted_drives}
+    do
+        [ $first -ne 1 ] && INSTALL_DRIVES="${INSTALL_DRIVES},"
+        INSTALL_DRIVES="${INSTALL_DRIVES}${sorted_drive}"
+
+        first=0
+    done
+}
+
+get_ignore_drives()
+{
+    sorted_drives="$@"
+
+    get_ignore_drives_prefix sd ${sorted_drives}
+    scsi_ignore_drives=${PREFIX_IGNORE_DRIVES}
+    get_ignore_drives_prefix hd ${sorted_drives}
+    sata_ignore_drives=${PREFIX_IGNORE_DRIVES}
+
+    IGNORE_DRIVES="${scsi_ignore_drives}${sata_ignore_drives}"
+    chop_length=$((${#IGNORE_DRIVES}-1))
+    IGNORE_DRIVES=${IGNORE_DRIVES:0:${chop_length}}
+}
+
+get_ignore_drives_prefix()
+{
+    prefix=$1
+    shift
+    sorted_drives="$@"
+
+    drive_letters="abcdefghijklmnopqrstuvwxyz"
+
+    PREFIX_IGNORE_DRIVES=""
+    letter_posn=0
+    while [ ${letter_posn} -lt ${#drive_letters} ]
+    do
+        test_letter=${drive_letters:$letter_posn:1}
+        letter_posn=$((letter_posn+1))
+
+        for sorted_drive in ${sorted_drives}
+        do
+            if [ "${test_letter}" = "${sorted_drive:2:1}" ]
+            then
+              continue 2
+            fi
+        done
+
+        PREFIX_IGNORE_DRIVES="${PREFIX_IGNORE_DRIVES}${prefix}${test_letter},"
+    done
+}
+
+generate_partition_lines()
+{
+    num_drives="$#"
+    echo "num_drives=${num_drives}"
+    sorted_drives="$@"
+
+<% if node[:platform_version].to_f >= 6 -%>
+    fs_type="ext4"
+<% else -%>
+    fs_type="ext3"
+<% end -%>
+    disk_number=1
+    boot_partitions=""
+    swap_partitions=""
+    for sorted_drive in ${sorted_drives}
+    do
+        boot_partition_name="raid.${disk_number}0"
+        swap_partition_name="raid.${disk_number}1"
+
+        echo "part ${boot_partition_name}    --size 100         --asprimary --ondrive=${sorted_drive}" >> /tmp/diskpart
+        echo "part ${swap_partition_name}    --size 1   --grow  --asprimary --ondrive=${sorted_drive}" >> /tmp/diskpart
+
+        boot_partitions="${boot_partitions}${boot_partition_name}"
+        swap_partitions="${swap_partitions}${swap_partition_name}"
+        if [ ${disk_number} -lt ${num_drives} ]
+        then
+            boot_partitions="${boot_partitions} "
+            swap_partitions="${swap_partitions} "
+        fi
+
+        disk_number=$(($disk_number+1))
+    done
+
+    # Generate the raid lines
+    echo "raid /boot --fstype ${fs_type} --device=md0 --level=RAID1 ${boot_partitions}" >> /tmp/diskpart
+    echo "raid pv.01 --fstype ${fs_type} --device=md1 --level=RAID1 ${swap_partitions}" >> /tmp/diskpart
+}
+
 while : ; do
   sleep 10
   if [ -d /mnt/sysimage/root ]; then
@@ -75,75 +204,67 @@ host_name=$(hostname)
 curlargs=(--connect-timeout 60 -s -L -X GET --max-time 240 -u "$CROWBAR_KEY" --digest --anyauth)
 drive_sns=$(./curl "${curlargs[@]}" "http://<%= @admin_node_ip %>:3000/crowbar/provisioner/1.0/get_installation_drives/default?name=${host_name}")
 
-
 # Translate the list of serial numbers into a list of drives
 drives=""
 num_drives=0
 for drive_sn in ${drive_sns}
 do
-    drive=$drive_sn
-    #drive=find_drive "${drive_sn}"
+    find_drive "${drive_sn}"
 
     [ $num_drives -ne 0 ] && drives="${drives}\n"
-    drives="${drives}${drive}"
+    drives="${drives}${DRIVE_NAME}"
 
     num_drives=$((num_drives+1))
 done
 
 sorted_drives=$(echo -e $drives|sort)
 
-# Put together comma separated sorted list of the drives
-install_drives=""
-first=1
-for sorted_drive in ${sorted_drives}
-do
-    [ $first -ne 1 ] && install_drives="${install_drives},"
-    install_drives="${install_drives}${sorted_drive}"
-
-    first=0
-done
-
+get_install_drives $sorted_drives
 get_ignore_drives $sorted_drives
 
-get_ignore_drives()
-{
-    sorted_drives="$@"
-    drive_letters="abcdefghijklmnopqrstuvwxyz"
+if [ $num_drives -gt 1 ]
+then
+    # RAID 1
+    echo "bootloader --location=mbr --driveorder=${INSTALL_DRIVES} --append=\"rhgb quiet\"" > /tmp/diskpart
+    echo "zerombr" >> /tmp/diskpart
 
-    scsi_ignore_drives=""
-    sata_ignore_drives=""
-    letter_posn=0
-    while [ ${letter_posn} -lt ${#drive_letters} ]
-    do
-        test_letter=${drive_letters:$letter_posn:1}
-        letter_posn=$((letter_posn+1))
+<% if node[:platform_version].to_f >= 6 -%>
+    echo "ignoredisk --only-use=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "clearpart --all --drives=${INSTALL_DRIVES}" >> /tmp/diskpart
+    generate_partition_lines $sorted_drives
+    echo "volgroup lv_admin --pesize=32768 pv.01" >> /tmp/diskpart
+    echo "logvol / --fstype ext4 --name=lv_root --vgname=lv_admin --size=1 --grow" >> /tmp/diskpart
+<% else -%>
+    echo "ignoredisk --drives=${IGNORE_DRIVES}" >> /tmp/diskpart
+    echo "clearpart --all --drives=${INSTALL_DRIVES}" >> /tmp/diskpart
+    generate_partition_lines $sorted_drives
+    echo "volgroup lv_admin --pesize=32768 pv.01" >> /tmp/diskpart
+    echo "logvol / --fstype ext3 --name=lv_root --vgname=lv_admin --size=1 --grow" >> /tmp/diskpart
+<% end -%>
+    echo "logvol swap --fstype swap --name=lv_swap --vgname=lv_admin --recommended" >> /tmp/diskpart
+else
+    # No RAID
+    echo "bootloader --location=mbr --driveorder=${INSTALL_DRIVES} --append=\"rhgb quiet\"" > /tmp/diskpart
+    echo "zerombr" >> /tmp/diskpart
 
-        for sorted_drive in ${sorted_drives}
-        do
-            if [ "${test_letter}" = "${sorted_drive:2:1}" ]
-            then
-              continue 2
-            fi
-        done
-
-        scsi_ignore_drives="${scsi_ignore_drives}sd${test_letter},"
-        sata_ignore_drives="${sata_ignore_drives}hd${test_letter},"
-    done
-
-    IGNORE_DRIVES="${scsi_ignore_drives}${sata_ignore_drives}"
-    chop_length=$((${#IGNORE_DRIVES}-1))
-    IGNORE_DRIVES=${IGNORE_DRIVES:0:${chop_length}}
-}
-
-
-
-
-
-
-
-
-
-
+<% if node[:platform_version].to_f >= 6 -%>
+    echo "ignoredisk --only-use=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "clearpart --all --drives=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "part /boot --fstype ext4 --size=100 --ondisk=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "part swap --recommended" >> /tmp/diskpart
+    echo "part pv.6 --size=1 --grow --ondisk=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "volgroup lv_admin --pesize=32768 pv.6" >> /tmp/diskpart
+    echo "logvol / --fstype ext4 --name=lv_root --vgname=lv_admin --size=1 --grow" >> /tmp/diskpart
+<% else -%>
+    echo "ignoredisk --drives=${IGNORE_DRIVES}" >> /tmp/diskpart
+    echo "clearpart --all --drives=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "part /boot --fstype ext3 --size=100 --ondisk=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "part swap --recommended" >> /tmp/diskpart
+    echo "part pv.6 --size=0 --grow --ondisk=${INSTALL_DRIVES}" >> /tmp/diskpart
+    echo "volgroup lv_admin --pesize=32768 pv.6" >> /tmp/diskpart
+    echo "logvol / --fstype ext3 --name=lv_root --vgname=lv_admin --size=1 --grow" >> /tmp/diskpart
+<% end -%>
+fi
 
 
 %post

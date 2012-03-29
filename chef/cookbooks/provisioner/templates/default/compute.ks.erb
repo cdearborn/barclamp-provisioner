@@ -67,8 +67,10 @@ find_drive()
             fi
 
             # Get the serial number of the drive
-            serial_number_line=$(scsi_id --whitelisted --replace-whitespace --export --device=/dev/${drive_name} | grep "ID_SCSI_SERIAL=")
-            test_serial_number=$(echo $serial_number_line|awk -F= '{print $2}')
+            # Note that we MUST do this using hdparm as this is the only
+            # command that BusyBox supports to retrieve drive serial numbers
+            serial_number_line=$(hdparm -I /dev/${drive_name} | grep "Serial Number:")
+            test_serial_number=$(echo $serial_number_line|awk -F: '{print $2}')
             test_serial_number=$(sed -e 's/^[:space:]*[:space:]$//' <<<$test_serial_number)
 
             if [ "${test_serial_number}" = "${serial_number}" ]

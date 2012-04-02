@@ -184,7 +184,6 @@ get_ignore_drives_prefix()
 generate_partition_lines()
 {
     num_drives="$#"
-    echo "num_drives=${num_drives}"
     sorted_drives="$@"
 
 <% if node[:platform_version].to_f >= 6 -%>

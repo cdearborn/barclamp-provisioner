@@ -87,6 +87,45 @@ find_drive()
     done
 }
 
+destroy_partitions()
+{
+    for disk in $@
+    do
+        partitions=$(fdisk -l ${disk} | grep "^/dev/" | awk '{print $1}')
+        if [ -n "${partitions}" ]
+        then
+            num_partitions=$(echo "${partitions}" | wc -w)
+            commands=""
+            partition_count=1
+            for partition in ${partitions}
+            do
+                if [[ "${partition}" =~ ^/dev/[sh]d[a-z]([0-9]+) ]];
+                then
+                    partition_number="${BASH_REMATCH[1]}"
+                    commands="${commands}
+d"
+                    if [ "${partition_count}" -lt "${num_partitions}" ]
+                    then 
+                        commands="${commands}
+${partition_number}"
+                    fi
+                else
+                    echo "Warning: Unable to extract partition number from ${partition}"
+                fi
+
+                partition_count=$((partition_count+1))
+            done
+            commands="${commands}
+w"
+            commands="${commands}
+q"
+            fdisk -cu ${disk}<<EOHD
+$commands
+EOHD
+        fi
+    done
+}
+
 get_install_drives()
 {
     # Put together comma separated sorted list of the drives
@@ -233,6 +272,7 @@ fi
 
 sorted_drives=$(echo -e $drives|sort)
 
+destroy_partitions $sorted_drives
 get_install_drives $sorted_drives
 get_ignore_drives $sorted_drives
 
